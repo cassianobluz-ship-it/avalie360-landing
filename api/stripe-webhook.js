@@ -80,7 +80,7 @@ export default async function handler(req, res) {
       id: orgId,
       name: orgName,
       slug: orgSlug,
-      admin_password: adminPasswordHash,
+      admin_password: adminPassword,
       primary_color: '#2563eb',
       logo_url: '',
       base_url: 'https://avalie360.vercel.app',
