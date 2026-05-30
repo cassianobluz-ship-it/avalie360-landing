@@ -3,16 +3,6 @@ const { createClient } = require('@supabase/supabase-js');
 
 export const config = { api: { bodyParser: false } };
 
-// ── MESMO HASH DO App.jsx ──
-function simpleHash(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) + h) ^ str.charCodeAt(i);
-    h = h >>> 0;
-  }
-  return h.toString(16);
-}
-
 function generatePassword(length = 12) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -67,12 +57,11 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true });
   }
 
-  // Gera senha e aplica o MESMO hash do App.jsx
+  // Senha em texto puro — app compara diretamente (linha 1308 do App.jsx)
   const adminPassword = generatePassword(12);
-  const adminPasswordHash = simpleHash(adminPassword);
   const orgId = generateOrgId(orgSlug);
 
-  console.log(`Criando org: ${orgSlug} | senha: ${adminPassword} | hash: ${adminPasswordHash}`);
+  console.log(`Criando org: ${orgSlug} | senha: ${adminPassword}`);
 
   const { error: orgError } = await supabase
     .from('organizations')
@@ -104,8 +93,9 @@ export default async function handler(req, res) {
 
   console.log(`✅ Organização criada: ${orgSlug}`);
 
-  // Email via Resend
-  const loginUrl = `https://avalie360.vercel.app/${orgSlug}/login`;
+  // URL do painel admin — tela inicial do app, não login de usuário
+  const appUrl = 'https://avalie360.vercel.app';
+  const userLoginUrl = `https://avalie360.vercel.app/${orgSlug}/login`;
 
   const emailHtml = `
 <!DOCTYPE html>
@@ -113,47 +103,79 @@ export default async function handler(req, res) {
 <head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f7f9ff;font-family:Arial,sans-serif">
   <div style="max-width:600px;margin:32px auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(37,99,235,.1)">
+    
     <div style="background:linear-gradient(135deg,#1e3a8a,#2563eb);padding:32px 36px;text-align:center">
       <div style="font-size:28px;font-weight:800;color:white">Avalie360</div>
-      <div style="color:rgba(255,255,255,.75);font-size:14px;margin-top:6px">Sua conta foi criada com sucesso!</div>
+      <div style="color:rgba(255,255,255,.75);font-size:14px;margin-top:6px">Sua conta foi criada com sucesso! 🎉</div>
     </div>
+
     <div style="padding:32px 36px">
       <p style="font-size:16px;color:#0f172a;margin-bottom:8px">Olá, <strong>${adminName}</strong>! 👋</p>
       <p style="font-size:15px;color:#475569;line-height:1.7;margin-bottom:24px">
-        O pagamento foi confirmado e sua organização <strong>${orgName}</strong> está pronta para usar.
+        O pagamento foi confirmado e sua organização <strong>${orgName}</strong> está pronta para uso. Abaixo estão suas credenciais de administrador.
       </p>
-      <div style="background:#eff6ff;border-radius:12px;padding:20px 24px;margin-bottom:24px">
-        <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px">CREDENCIAIS DE ADMINISTRADOR</div>
-        <div style="margin-bottom:12px">
-          <span style="font-size:13px;color:#475569">URL de acesso:</span><br>
-          <a href="${loginUrl}" style="font-size:15px;font-weight:700;color:#2563eb">${loginUrl}</a>
-        </div>
-        <div style="margin-bottom:12px">
-          <span style="font-size:13px;color:#475569">Identificador da organização:</span><br>
+
+      <!-- CREDENCIAIS ADMIN -->
+      <div style="background:#eff6ff;border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid #2563eb">
+        <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px">🔐 Credenciais de Administrador</div>
+        <div style="margin-bottom:10px">
+          <span style="font-size:13px;color:#64748b">Identificador da organização:</span><br>
           <strong style="font-size:15px;color:#0f172a">${orgSlug}</strong>
         </div>
         <div>
-          <span style="font-size:13px;color:#475569">Senha de administrador:</span><br>
-          <strong style="font-size:20px;color:#0f172a;font-family:monospace;background:#e2e8f0;padding:6px 14px;border-radius:6px;display:inline-block;margin-top:4px">${adminPassword}</strong>
+          <span style="font-size:13px;color:#64748b">Senha do administrador:</span><br>
+          <strong style="font-size:20px;color:#1e40af;font-family:monospace;background:#dbeafe;padding:6px 14px;border-radius:6px;display:inline-block;margin-top:4px;letter-spacing:1px">${adminPassword}</strong>
         </div>
       </div>
-      <p style="font-size:13px;color:#94a3b8;margin-bottom:24px">⚠️ Salve esta senha em local seguro. Você pode alterá-la a qualquer momento no painel.</p>
+
+      <p style="font-size:13px;color:#f59e0b;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:24px">
+        ⚠️ <strong>Salve esta senha agora</strong> — ela não será exibida novamente. Você pode alterá-la depois no painel de configurações.
+      </p>
+
+      <!-- COMO ACESSAR -->
+      <div style="background:#f8faff;border-radius:12px;padding:20px 24px;margin-bottom:24px;border:1px solid #e2e8f0">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">📋 Como acessar o painel de administrador:</div>
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
+          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
+          <span style="font-size:14px;color:#475569">Acesse <a href="${appUrl}" style="color:#2563eb;font-weight:600">${appUrl}</a></span>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
+          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
+          <span style="font-size:14px;color:#475569">Clique em <strong>"Acessar painel"</strong></span>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
+          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
+          <span style="font-size:14px;color:#475569">Selecione <strong>${orgName}</strong> na lista</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
+          <span style="font-size:14px;color:#475569">Digite a senha acima e clique em <strong>"Entrar"</strong></span>
+        </div>
+      </div>
+
+      <!-- BOTÃO -->
+      <div style="text-align:center;margin-bottom:28px">
+        <a href="${appUrl}" style="background:#2563eb;color:white;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
+          Acessar o painel →
+        </a>
+      </div>
+
+      <!-- PRÓXIMOS PASSOS -->
       <div style="margin-bottom:24px">
-        <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:12px">Próximos passos:</div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">1️⃣ Acesse o painel admin e configure sua organização</div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">2️⃣ Importe seus colaboradores via CSV</div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">3️⃣ Configure as atribuições (quem avalia quem)</div>
-        <div style="font-size:14px;color:#475569">4️⃣ Lance o ciclo e envie os links para sua equipe!</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">🚀 Próximos passos após entrar:</div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">1️⃣ Configure sua organização (cor, ciclo ativo) em <strong>⚙️ Config</strong></div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">2️⃣ Importe seus colaboradores via CSV em <strong>👥 Usuários</strong></div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">3️⃣ Configure as atribuições em <strong>🔗 Atribuições</strong></div>
+        <div style="font-size:14px;color:#475569">4️⃣ Lance o ciclo! O link para seus colaboradores é: <a href="${userLoginUrl}" style="color:#2563eb">${userLoginUrl}</a></div>
       </div>
-      <div style="text-align:center;margin-bottom:24px">
-        <a href="${loginUrl}" style="background:#2563eb;color:white;padding:13px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block">Acessar o painel →</a>
-      </div>
-      <p style="font-size:14px;color:#475569;line-height:1.7">
-        Dúvidas? WhatsApp <a href="https://wa.me/5511986096470" style="color:#2563eb">(11) 98609-6470</a> ou <a href="mailto:avalie360@conectandogente.com" style="color:#2563eb">avalie360@conectandogente.com</a>
+
+      <p style="font-size:14px;color:#475569;line-height:1.7;border-top:1px solid #f1f5f9;padding-top:20px">
+        Dúvidas? Estamos disponíveis pelo WhatsApp <a href="https://wa.me/5511986096470" style="color:#2563eb">(11) 98609-6470</a> ou pelo email <a href="mailto:avalie360@conectandogente.com" style="color:#2563eb">avalie360@conectandogente.com</a>.
       </p>
     </div>
+
     <div style="background:#f1f5f9;padding:16px 36px;text-align:center;font-size:12px;color:#94a3b8">
-      Avalie360 · Conectando Gente · Em conformidade com a LGPD
+      Avalie360 · Conectando Gente · Em conformidade com a LGPD · Lei nº 13.709/2018
     </div>
   </div>
 </body>
