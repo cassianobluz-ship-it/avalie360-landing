@@ -1,32 +1,46 @@
 // /api/stripe-webhook.js
-// Vercel Serverless Function — recebe confirmação do Stripe e:
-//   1. Cria a organização no Supabase
-//   2. Envia email de boas-vindas via Resend
+// IMPORTANTE: precisa do body raw para verificar assinatura do Stripe
 
 const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 
-// ── GERADOR DE SENHA ──
+// Desabilita o bodyParser padrão da Vercel para esta rota
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 function generatePassword(length = 12) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#';
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-// ── GERADOR DE ID (igual ao padrão da Sepal) ──
 function generateOrgId(slug) {
   return `${slug}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-module.exports = async (req, res) => {
+// Lê o body como buffer raw
+async function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const sig = req.headers['stripe-signature'];
+  const rawBody = await getRawBody(req);
 
   let event;
   try {
     event = stripe.webhooks.constructEvent(
-      req.body,
+      rawBody,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
@@ -42,7 +56,6 @@ module.exports = async (req, res) => {
   const session = event.data.object;
   const { orgName, orgSlug, adminName, adminEmail, numColabs } = session.metadata;
 
-  // ── SUPABASE ──
   const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
@@ -63,7 +76,6 @@ module.exports = async (req, res) => {
   const adminPassword = generatePassword(12);
   const orgId = generateOrgId(orgSlug);
 
-  // Inserir com todas as colunas obrigatórias conforme tabela real
   const { error: orgError } = await supabase
     .from('organizations')
     .insert({
@@ -94,7 +106,7 @@ module.exports = async (req, res) => {
 
   console.log(`✅ Organização criada: ${orgSlug}`);
 
-  // ── EMAIL via Resend ──
+  // Email via Resend
   const loginUrl = `https://avalie360.vercel.app/${orgSlug}/login`;
 
   const emailHtml = `
@@ -170,4 +182,4 @@ module.exports = async (req, res) => {
   }
 
   return res.status(200).json({ received: true });
-};
+}
