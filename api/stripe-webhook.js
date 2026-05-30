@@ -1,18 +1,20 @@
-// /api/stripe-webhook.js
-// IMPORTANTE: precisa do body raw para verificar assinatura do Stripe
-
 const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 
-// Desabilita o bodyParser padrão da Vercel para esta rota
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+export const config = { api: { bodyParser: false } };
+
+// ── MESMO HASH DO App.jsx ──
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) ^ str.charCodeAt(i);
+    h = h >>> 0;
+  }
+  return h.toString(16);
+}
 
 function generatePassword(length = 12) {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#';
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
@@ -20,7 +22,6 @@ function generateOrgId(slug) {
   return `${slug}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-// Lê o body como buffer raw
 async function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -39,11 +40,7 @@ export default async function handler(req, res) {
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     console.error('Webhook signature error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -56,10 +53,7 @@ export default async function handler(req, res) {
   const session = event.data.object;
   const { orgName, orgSlug, adminName, adminEmail, numColabs } = session.metadata;
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-  );
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
   // Verifica se slug já existe
   const { data: existing } = await supabase
@@ -73,8 +67,12 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true });
   }
 
+  // Gera senha e aplica o MESMO hash do App.jsx
   const adminPassword = generatePassword(12);
+  const adminPasswordHash = simpleHash(adminPassword);
   const orgId = generateOrgId(orgSlug);
+
+  console.log(`Criando org: ${orgSlug} | senha: ${adminPassword} | hash: ${adminPasswordHash}`);
 
   const { error: orgError } = await supabase
     .from('organizations')
@@ -82,7 +80,7 @@ export default async function handler(req, res) {
       id: orgId,
       name: orgName,
       slug: orgSlug,
-      admin_password: adminPassword,
+      admin_password: adminPasswordHash,
       primary_color: '#2563eb',
       logo_url: '',
       base_url: 'https://avalie360.vercel.app',
@@ -136,10 +134,10 @@ export default async function handler(req, res) {
         </div>
         <div>
           <span style="font-size:13px;color:#475569">Senha de administrador:</span><br>
-          <strong style="font-size:18px;color:#0f172a;font-family:monospace;background:#e2e8f0;padding:4px 10px;border-radius:6px">${adminPassword}</strong>
+          <strong style="font-size:20px;color:#0f172a;font-family:monospace;background:#e2e8f0;padding:6px 14px;border-radius:6px;display:inline-block;margin-top:4px">${adminPassword}</strong>
         </div>
       </div>
-      <p style="font-size:13px;color:#94a3b8;margin-bottom:24px">⚠️ Salve esta senha em local seguro.</p>
+      <p style="font-size:13px;color:#94a3b8;margin-bottom:24px">⚠️ Salve esta senha em local seguro. Você pode alterá-la a qualquer momento no painel.</p>
       <div style="margin-bottom:24px">
         <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:12px">Próximos passos:</div>
         <div style="margin-bottom:8px;font-size:14px;color:#475569">1️⃣ Acesse o painel admin e configure sua organização</div>
