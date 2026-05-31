@@ -41,7 +41,38 @@ export default async function handler(req, res) {
   }
 
   const session = event.data.object;
-  const { orgName, orgSlug, adminName, adminEmail, numColabs } = session.metadata;
+  const { type, orgId, orgName, orgSlug, adminName, adminEmail, numColabs } = session.metadata;
+
+  // ── PLANO PERSONALIZADO (upgrade de formulários) ──
+  if (type === 'plan_custom') {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+    const { error } = await supabase
+      .from('organizations')
+      .update({ plan_custom: true })
+      .eq('id', orgId);
+
+    if (error) {
+      console.error('Erro ao ativar plan_custom:', error);
+      return res.status(500).json({ error: 'Erro ao ativar plano' });
+    }
+    console.log(`✅ Plano Personalizado ativado para org: ${orgSlug}`);
+
+    // Notificação por email
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'Avalie360 <avalie360@conectandogente.com>',
+          to: adminEmail || 'avalie360@conectandogente.com',
+          subject: `✅ Plano Personalizado ativado — ${orgName}`,
+          html: `<p>Olá! O <strong>Plano Personalizado</strong> foi ativado com sucesso para <strong>${orgName}</strong>.<br><br>Você já pode editar os formulários acessando o painel: <a href="https://avalie360.vercel.app/${orgSlug}/login">avalie360.vercel.app/${orgSlug}/login</a> → Formulários.</p>`,
+        }),
+      });
+    } catch(e) { console.error('Email notif error:', e); }
+
+    return res.status(200).json({ received: true });
+  }
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
