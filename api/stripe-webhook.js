@@ -1,7 +1,8 @@
 const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 
-export const config = { api: { bodyParser: false } };
+// Desabilita bodyParser para receber raw body
+module.exports.config = { api: { bodyParser: false } };
 
 function generatePassword(length = 12) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -21,7 +22,7 @@ async function getRawBody(req) {
   });
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
   const session = event.data.object;
   const { type, orgId, orgName, orgSlug, adminName, adminEmail, numColabs } = session.metadata;
 
-  // ── PLANO PERSONALIZADO (upgrade de formulários) ──
+  // ── PLANO PERSONALIZADO ──
   if (type === 'plan_custom') {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
     const { error } = await supabase
@@ -55,9 +56,8 @@ export default async function handler(req, res) {
       console.error('Erro ao ativar plan_custom:', error);
       return res.status(500).json({ error: 'Erro ao ativar plano' });
     }
-    console.log(`✅ Plano Personalizado ativado para org: ${orgSlug}`);
+    console.log(`✅ Plano Personalizado ativado: ${orgSlug}`);
 
-    // Notificação por email
     try {
       await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -66,17 +66,17 @@ export default async function handler(req, res) {
           from: 'Avalie360 <avalie360@conectandogente.com>',
           to: adminEmail || 'avalie360@conectandogente.com',
           subject: `✅ Plano Personalizado ativado — ${orgName}`,
-          html: `<p>Olá! O <strong>Plano Personalizado</strong> foi ativado com sucesso para <strong>${orgName}</strong>.<br><br>Você já pode editar os formulários acessando o painel: <a href="https://avalie360.vercel.app/${orgSlug}/login">avalie360.vercel.app/${orgSlug}/login</a> → Formulários.</p>`,
+          html: `<p>Olá! O <strong>Plano Personalizado</strong> foi ativado para <strong>${orgName}</strong>.<br><br>Acesse o painel: <a href="https://avalie360.vercel.app">avalie360.vercel.app</a> → Formulários para começar a personalizar.</p>`,
         }),
       });
-    } catch(e) { console.error('Email notif error:', e); }
+    } catch(e) { console.error('Email error:', e); }
 
     return res.status(200).json({ received: true });
   }
 
+  // ── NOVA CONTRATAÇÃO ──
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-  // Verifica se slug já existe
   const { data: existing } = await supabase
     .from('organizations')
     .select('id')
@@ -88,16 +88,13 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true });
   }
 
-  // Senha em texto puro — app compara diretamente (linha 1308 do App.jsx)
   const adminPassword = generatePassword(12);
-  const orgId = generateOrgId(orgSlug);
-
-  console.log(`Criando org: ${orgSlug} | senha: ${adminPassword}`);
+  const orgId2 = generateOrgId(orgSlug);
 
   const { error: orgError } = await supabase
     .from('organizations')
     .insert({
-      id: orgId,
+      id: orgId2,
       name: orgName,
       slug: orgSlug,
       admin_password: adminPassword,
@@ -115,6 +112,8 @@ export default async function handler(req, res) {
       reminder_days: 3,
       scale_model: 'frequencia',
       yesno_labels: {"0":"Não","1":"Sim","2":"Atenção"},
+      org_type: 'religiosa',
+      plan_custom: false,
     });
 
   if (orgError) {
@@ -124,90 +123,40 @@ export default async function handler(req, res) {
 
   console.log(`✅ Organização criada: ${orgSlug}`);
 
-  // URL do painel admin — tela inicial do app, não login de usuário
-  const appUrl = 'https://avalie360.vercel.app';
-  const userLoginUrl = `https://avalie360.vercel.app/${orgSlug}/login`;
+  const loginUrl = `https://avalie360.vercel.app`;
 
-  const emailHtml = `
-<!DOCTYPE html>
+  const emailHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f7f9ff;font-family:Arial,sans-serif">
   <div style="max-width:600px;margin:32px auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(37,99,235,.1)">
-    
     <div style="background:linear-gradient(135deg,#1e3a8a,#2563eb);padding:32px 36px;text-align:center">
       <div style="font-size:28px;font-weight:800;color:white">Avalie360</div>
-      <div style="color:rgba(255,255,255,.75);font-size:14px;margin-top:6px">Sua conta foi criada com sucesso! 🎉</div>
+      <div style="color:rgba(255,255,255,.75);font-size:14px;margin-top:6px">Sua conta foi criada com sucesso!</div>
     </div>
-
     <div style="padding:32px 36px">
       <p style="font-size:16px;color:#0f172a;margin-bottom:8px">Olá, <strong>${adminName}</strong>! 👋</p>
-      <p style="font-size:15px;color:#475569;line-height:1.7;margin-bottom:24px">
-        O pagamento foi confirmado e sua organização <strong>${orgName}</strong> está pronta para uso. Abaixo estão suas credenciais de administrador.
-      </p>
-
-      <!-- CREDENCIAIS ADMIN -->
+      <p style="font-size:15px;color:#475569;line-height:1.7;margin-bottom:24px">O pagamento foi confirmado e sua organização <strong>${orgName}</strong> está pronta para usar.</p>
       <div style="background:#eff6ff;border-radius:12px;padding:20px 24px;margin-bottom:24px;border-left:4px solid #2563eb">
         <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px">🔐 Credenciais de Administrador</div>
-        <div style="margin-bottom:10px">
-          <span style="font-size:13px;color:#64748b">Identificador da organização:</span><br>
-          <strong style="font-size:15px;color:#0f172a">${orgSlug}</strong>
-        </div>
-        <div>
-          <span style="font-size:13px;color:#64748b">Senha do administrador:</span><br>
-          <strong style="font-size:20px;color:#1e40af;font-family:monospace;background:#dbeafe;padding:6px 14px;border-radius:6px;display:inline-block;margin-top:4px;letter-spacing:1px">${adminPassword}</strong>
-        </div>
+        <div style="margin-bottom:12px"><span style="font-size:13px;color:#64748b">Identificador:</span><br><strong style="font-size:15px;color:#0f172a">${orgSlug}</strong></div>
+        <div><span style="font-size:13px;color:#64748b">Senha do administrador:</span><br>
+        <strong style="font-size:20px;color:#1e40af;font-family:monospace;background:#dbeafe;padding:6px 14px;border-radius:6px;display:inline-block;margin-top:4px;letter-spacing:1px">${adminPassword}</strong></div>
       </div>
-
-      <p style="font-size:13px;color:#f59e0b;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:24px">
-        ⚠️ <strong>Salve esta senha agora</strong> — ela não será exibida novamente. Você pode alterá-la depois no painel de configurações.
-      </p>
-
-      <!-- COMO ACESSAR -->
+      <p style="font-size:13px;color:#f59e0b;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:24px">⚠️ <strong>Salve esta senha agora</strong> — ela não será exibida novamente.</p>
       <div style="background:#f8faff;border-radius:12px;padding:20px 24px;margin-bottom:24px;border:1px solid #e2e8f0">
-        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">📋 Como acessar o painel de administrador:</div>
-        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
-          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
-          <span style="font-size:14px;color:#475569">Acesse <a href="${appUrl}" style="color:#2563eb;font-weight:600">${appUrl}</a></span>
-        </div>
-        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
-          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
-          <span style="font-size:14px;color:#475569">Clique em <strong>"Acessar painel"</strong></span>
-        </div>
-        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">
-          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
-          <span style="font-size:14px;color:#475569">Selecione <strong>${orgName}</strong> na lista</span>
-        </div>
-        <div style="display:flex;gap:10px;align-items:flex-start">
-          <div style="width:22px;height:22px;background:#2563eb;border-radius:50%;color:white;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
-          <span style="font-size:14px;color:#475569">Digite a senha acima e clique em <strong>"Entrar"</strong></span>
-        </div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:14px">📋 Como acessar o painel admin:</div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">1️⃣ Acesse <a href="${loginUrl}" style="color:#2563eb;font-weight:600">${loginUrl}</a></div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">2️⃣ Clique em <strong>"Acessar painel"</strong></div>
+        <div style="margin-bottom:8px;font-size:14px;color:#475569">3️⃣ Selecione <strong>${orgName}</strong></div>
+        <div style="font-size:14px;color:#475569">4️⃣ Digite a senha acima</div>
       </div>
-
-      <!-- BOTÃO -->
-      <div style="text-align:center;margin-bottom:28px">
-        <a href="${appUrl}" style="background:#2563eb;color:white;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
-          Acessar o painel →
-        </a>
+      <div style="text-align:center;margin-bottom:24px">
+        <a href="${loginUrl}" style="background:#2563eb;color:white;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">Acessar o painel →</a>
       </div>
-
-      <!-- PRÓXIMOS PASSOS -->
-      <div style="margin-bottom:24px">
-        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px">🚀 Próximos passos após entrar:</div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">1️⃣ Configure sua organização (cor, ciclo ativo) em <strong>⚙️ Config</strong></div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">2️⃣ Importe seus colaboradores via CSV em <strong>👥 Usuários</strong></div>
-        <div style="margin-bottom:8px;font-size:14px;color:#475569">3️⃣ Configure as atribuições em <strong>🔗 Atribuições</strong></div>
-        <div style="font-size:14px;color:#475569">4️⃣ Lance o ciclo! O link para seus colaboradores é: <a href="${userLoginUrl}" style="color:#2563eb">${userLoginUrl}</a></div>
-      </div>
-
-      <p style="font-size:14px;color:#475569;line-height:1.7;border-top:1px solid #f1f5f9;padding-top:20px">
-        Dúvidas? Estamos disponíveis pelo WhatsApp <a href="https://wa.me/5511986096470" style="color:#2563eb">(11) 98609-6470</a> ou pelo email <a href="mailto:avalie360@conectandogente.com" style="color:#2563eb">avalie360@conectandogente.com</a>.
-      </p>
+      <p style="font-size:14px;color:#475569;line-height:1.7;border-top:1px solid #f1f5f9;padding-top:20px">Dúvidas? WhatsApp <a href="https://wa.me/5511986096470" style="color:#2563eb">(11) 98609-6470</a> ou <a href="mailto:avalie360@conectandogente.com" style="color:#2563eb">avalie360@conectandogente.com</a></p>
     </div>
-
-    <div style="background:#f1f5f9;padding:16px 36px;text-align:center;font-size:12px;color:#94a3b8">
-      Avalie360 · Conectando Gente · Em conformidade com a LGPD · Lei nº 13.709/2018
-    </div>
+    <div style="background:#f1f5f9;padding:16px 36px;text-align:center;font-size:12px;color:#94a3b8">Avalie360 · Conectando Gente · Em conformidade com a LGPD</div>
   </div>
 </body>
 </html>`;
@@ -215,10 +164,7 @@ export default async function handler(req, res) {
   try {
     const emailRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         from: 'Avalie360 <avalie360@conectandogente.com>',
         to: adminEmail,
@@ -233,4 +179,4 @@ export default async function handler(req, res) {
   }
 
   return res.status(200).json({ received: true });
-}
+};
