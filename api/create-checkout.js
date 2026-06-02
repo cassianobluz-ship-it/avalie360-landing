@@ -1,16 +1,48 @@
-// /api/create-checkout-custom.js
-// Cria sessão Stripe para contratação do Plano Personalizado (R$300/ciclo)
-
+// /api/create-checkout.js
 const Stripe = require('stripe');
 
+// Parser manual de body JSON (Vercel às vezes não parseia automaticamente)
+async function parseBody(req) {
+  return new Promise((resolve) => {
+    // Se já foi parseado pelo middleware da Vercel
+    if (req.body && typeof req.body === 'object') {
+      return resolve(req.body);
+    }
+    // Parser manual para raw body
+    let data = '';
+    req.on('data', chunk => { data += chunk.toString(); });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data));
+      } catch(e) {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
+}
+
 module.exports = async (req, res) => {
+  // CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { orgId, orgName, orgSlug, adminEmail } = req.body;
-  if (!orgId || !orgName || !orgSlug) return res.status(400).json({ error: 'Campos obrigatórios faltando' });
+  const body = await parseBody(req);
+  const { orgName, orgSlug, adminName, adminEmail, numColabs } = body;
+
+  console.log('create-checkout received:', { orgName, orgSlug, adminName, adminEmail, numColabs });
+
+  if (!orgName || !orgSlug || !adminName || !adminEmail || !numColabs) {
+    console.log('Campos faltando:', JSON.stringify({ orgName: !!orgName, orgSlug: !!orgSlug, adminName: !!adminName, adminEmail: !!adminEmail, numColabs: !!numColabs }));
+    return res.status(400).json({ error: 'Campos obrigatórios faltando' });
+  }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://avalie360.vercel.app';
+  const totalAmount = 1500 * parseInt(numColabs);
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -19,32 +51,30 @@ module.exports = async (req, res) => {
         price_data: {
           currency: 'brl',
           product_data: {
-            name: 'Avalie360 — Plano Personalizado',
-            description: `Personalização de formulários · ${orgName} · por ciclo`,
+            name: 'Avalie360 — Ciclo de Avaliação 360°',
+            description: `${numColabs} colaboradores avaliados · ${orgName}`,
           },
-          unit_amount: 30000, // R$300,00
+          unit_amount: totalAmount,
         },
         quantity: 1,
       }],
       mode: 'payment',
-      customer_email: adminEmail || undefined,
-      success_url: `${appUrl}/${orgSlug}/login?custom_upgrade=1`,
-      cancel_url: `${appUrl}/${orgSlug}/login`,
+      customer_email: adminEmail,
+      success_url: `${appUrl}?success=1&email=${encodeURIComponent(adminEmail)}&slug=${encodeURIComponent(orgSlug)}`,
+      cancel_url: `https://avalie360.conectandogente.com/#contratar`,
       metadata: {
-        type: 'plan_custom',
-        orgId,
         orgName,
         orgSlug,
-        adminEmail: adminEmail || '',
-      },
-      payment_intent_data: {
-        metadata: { type: 'plan_custom', orgId, orgSlug },
+        adminName,
+        adminEmail,
+        numColabs: String(numColabs),
       },
     });
 
-    res.status(200).json({ sessionId: session.id });
+    console.log('Sessão Stripe criada:', session.id);
+    res.status(200).json({ sessionId: session.id, url: session.url });
   } catch (err) {
-    console.error('Stripe error:', err);
+    console.error('Stripe error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
