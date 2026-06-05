@@ -31,9 +31,9 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const body = await parseBody(req);
-  const { orgName, orgSlug, adminName, adminEmail, numColabs } = body;
+  const { orgName, orgSlug, adminName, adminEmail, numColabs, orgType, cupomCode } = body;
 
-  console.log('create-checkout received:', { orgName, orgSlug, adminName, adminEmail, numColabs });
+  console.log('create-checkout received:', { orgName, orgSlug, adminName, adminEmail, numColabs, orgType, cupomCode: cupomCode || 'none' });
 
   if (!orgName || !orgSlug || !adminName || !adminEmail || !numColabs) {
     console.log('Campos faltando:', JSON.stringify({ orgName: !!orgName, orgSlug: !!orgSlug, adminName: !!adminName, adminEmail: !!adminEmail, numColabs: !!numColabs }));
@@ -42,7 +42,30 @@ module.exports = async (req, res) => {
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://avalie360.vercel.app';
-  const totalAmount = 1500 * parseInt(numColabs);
+
+  // Verificar cupom de desconto parcial (100% já tratado no frontend via /api/create-org-free)
+  let descontoPct = 0;
+  if (cupomCode) {
+    try {
+      const { createClient } = require('@supabase/supabase-js');
+      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+      const { data: cupom } = await supabase
+        .from('cupons')
+        .select('*')
+        .eq('codigo', cupomCode.toUpperCase())
+        .eq('ativo', true)
+        .in('aplicavel_em', ['contratacao', 'ambos'])
+        .single();
+      if (cupom && (cupom.usos_max === null || cupom.usos < cupom.usos_max)) {
+        descontoPct = cupom.desconto_pct;
+        // Incrementar uso
+        await supabase.from('cupons').update({ usos: (cupom.usos || 0) + 1 }).eq('id', cupom.id);
+      }
+    } catch(e) { console.error('Erro ao verificar cupom:', e.message); }
+  }
+
+  const totalBruto = 1500 * parseInt(numColabs);
+  const totalAmount = descontoPct > 0 ? Math.round(totalBruto * (1 - descontoPct / 100)) : totalBruto;
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -68,6 +91,8 @@ module.exports = async (req, res) => {
         adminName,
         adminEmail,
         numColabs: String(numColabs),
+        orgType: orgType || 'religiosa',
+        cupomCode: cupomCode || '',
       },
     });
 
