@@ -67,6 +67,20 @@ module.exports = async (req, res) => {
   const totalBruto = 1500 * parseInt(numColabs);
   const totalAmount = descontoPct > 0 ? Math.round(totalBruto * (1 - descontoPct / 100)) : totalBruto;
 
+  const metadata = {
+    type: 'new_org',
+    orgName,
+    orgSlug,
+    adminName,
+    adminEmail,
+    numColabs: String(numColabs),
+    orgType: orgType || 'religiosa',
+    cupomCode: cupomCode || '',
+  };
+
+  console.log('create-checkout metadata a enviar ao Stripe:', JSON.stringify(metadata));
+  console.log('create-checkout unit_amount:', totalAmount, '| totalBruto:', totalBruto, '| descontoPct:', descontoPct);
+
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -85,21 +99,13 @@ module.exports = async (req, res) => {
       customer_email: adminEmail,
       success_url: `${appUrl}?success=1&email=${encodeURIComponent(adminEmail)}&slug=${encodeURIComponent(orgSlug)}`,
       cancel_url: `https://avalie360.conectandogente.com/#contratar`,
-      metadata: {
-        orgName,
-        orgSlug,
-        adminName,
-        adminEmail,
-        numColabs: String(numColabs),
-        orgType: orgType || 'religiosa',
-        cupomCode: cupomCode || '',
-      },
+      metadata,
     });
 
-    console.log('Sessão Stripe criada:', session.id);
+    console.log('Sessão Stripe criada com sucesso:', session.id, '| url:', session.url);
     res.status(200).json({ sessionId: session.id, url: session.url });
   } catch (err) {
-    console.error('Stripe error:', err.message);
+    console.error('Stripe error ao criar sessão:', err.message, '| code:', err.code, '| type:', err.type);
     res.status(500).json({ error: err.message });
   }
 };

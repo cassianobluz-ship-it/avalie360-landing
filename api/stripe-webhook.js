@@ -1,9 +1,6 @@
 const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 
-// Desabilita bodyParser para receber raw body
-module.exports.config = { api: { bodyParser: false } };
-
 function generatePassword(length = 12) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -22,12 +19,14 @@ async function getRawBody(req) {
   });
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const sig = req.headers['stripe-signature'];
   const rawBody = await getRawBody(req);
+
+  console.log('stripe-webhook: recebido. sig presente:', !!sig, '| rawBody length:', rawBody.length);
 
   let event;
   try {
@@ -37,12 +36,16 @@ module.exports = async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  console.log('stripe-webhook: evento validado:', event.type);
+
   if (event.type !== 'checkout.session.completed') {
     return res.status(200).json({ received: true });
   }
 
   const session = event.data.object;
   const { type, orgId, orgName, orgSlug, adminName, adminEmail, numColabs, orgType, cupomCode } = session.metadata;
+
+  console.log('stripe-webhook: metadata recebido:', JSON.stringify({ type, orgId, orgName, orgSlug, adminName, adminEmail, numColabs, orgType, cupomCode: cupomCode || 'none' }));
 
   // ── PLANO PERSONALIZADO ──
   if (type === 'plan_custom') {
@@ -179,4 +182,8 @@ module.exports = async function handler(req, res) {
   }
 
   return res.status(200).json({ received: true });
-};
+}
+
+// Desabilita bodyParser para receber raw body (assinatura Stripe)
+handler.config = { api: { bodyParser: false } };
+module.exports = handler;
